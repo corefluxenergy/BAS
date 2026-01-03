@@ -156,17 +156,12 @@ def export_excel(df):
         net_col = get_column_letter(df.columns.get_loc("Net (ex GST)") + 1)
         type_col = get_column_letter(df.columns.get_loc("Transaction Type") + 1)
 
-        # Auto-size columns
-        for col in ws.columns:
-            max_len = max(len(str(cell.value)) if cell.value else 0 for cell in col)
-            ws.column_dimensions[get_column_letter(col[0].column)].width = max_len + 2
-
         # GST dropdown
         dv = DataValidation(type="list", formula1='"YES,NO"', allow_blank=False)
         ws.add_data_validation(dv)
         dv.add(f"{gst_flag_col}2:{gst_flag_col}{last_row}")
 
-        # Row formulas + formatting
+        # Row formulas + currency formatting
         for r in range(2, last_row + 1):
             ws[f"{gst_amt_col}{r}"] = f'=IF({gst_flag_col}{r}="YES",{gross_col}{r}/11,0)'
             ws[f"{net_col}{r}"] = f'={gross_col}{r}-{gst_amt_col}{r}'
@@ -196,6 +191,11 @@ def export_excel(df):
 
         for r in range(s + 2, s + 7):
             ws[f"B{r}"].number_format = currency_fmt
+
+        # ---------------- FINAL AUTOSIZE (AFTER FORMATTING) ----------------
+        for col in ws.columns:
+            max_len = max(len(str(cell.value)) if cell.value else 0 for cell in col)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = max_len + 2
 
     return output.getvalue()
 
