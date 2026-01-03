@@ -3,6 +3,7 @@ import pandas as pd
 from io import BytesIO
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.styles import Font
 
 st.set_page_config(page_title="GST Working Papers", layout="wide")
 
@@ -96,13 +97,8 @@ ledger[["Transaction Type", "GST Claimable", "System Reason"]] = ledger.apply(
 )
 
 ledger["Gross Amount"] = ledger["Amount"].abs().round(2)
-ledger["GST Amount"] = ledger.apply(
-    lambda r: round(r["Gross Amount"] / 11, 2)
-    if r["GST Claimable"] == "YES"
-    else 0,
-    axis=1,
-)
-ledger["Net (ex GST)"] = ledger["Gross Amount"] - ledger["GST Amount"]
+ledger["GST Amount"] = 0.0          # placeholder (Excel will calculate)
+ledger["Net (ex GST)"] = ledger["Gross Amount"]
 ledger["Comment"] = ""
 
 # ------------------------
@@ -123,17 +119,8 @@ edited_df = st.data_editor(
     },
 )
 
-# Recalculate after edits
-edited_df["GST Amount"] = edited_df.apply(
-    lambda r: round(r["Gross Amount"] / 11, 2)
-    if r["GST Claimable"] == "YES"
-    else 0,
-    axis=1,
-)
-edited_df["Net (ex GST)"] = edited_df["Gross Amount"] - edited_df["GST Amount"]
-
 # ------------------------
-# Sidebar summaries (UI only)
+# Sidebar (UI-only summary)
 # ------------------------
 with st.sidebar:
     st.header("Ledger Overview")
@@ -141,25 +128,8 @@ with st.sidebar:
     st.write("Wise:", (edited_df["Account"] == "Wise").sum())
     st.write("Total rows:", len(edited_df))
 
-    st.divider()
-    st.header("GST Summary (BAS)")
-
-    g1 = edited_df.loc[
-        edited_df["Transaction Type"] == "Income", "Gross Amount"
-    ].sum()
-    one_a = round(g1 / 11, 2)
-
-    one_b = edited_df.loc[
-        edited_df["GST Claimable"] == "YES", "GST Amount"
-    ].sum()
-
-    st.metric("G1 – Total sales (incl GST)", f"${g1:,.2f}")
-    st.metric("1A – GST on sales", f"${one_a:,.2f}")
-    st.metric("1B – GST on purchases", f"${one_b:,.2f}")
-    st.metric("Net GST payable", f"${one_a - one_b:,.2f}")
-
 # ------------------------
-# Excel export (FORMULA-BASED SUMMARY)
+# Excel export (FORMULA-DRIVEN)
 # ------------------------
 def export_excel(df):
     output = BytesIO()
@@ -175,39 +145,41 @@ def export_excel(df):
             max_len = max(len(str(cell.value)) if cell.value else 0 for cell in col)
             ws.column_dimensions[get_column_letter(col[0].column)].width = max_len + 2
 
-        # Add YES/NO dropdown to GST Claimable column
-        gst_col_index = df.columns.get_loc("GST Claimable") + 1
-        gst_col_letter = get_column_letter(gst_col_index)
+        # GST Claimable dropdown
+        gst_col = get_column_letter(df.columns.get_loc("GST Claimable") + 1)
+        gross_col = get_column_letter(df.columns.get_loc("Gross Amount") + 1)
+        gst_amt_col = get_column_letter(df.columns.get_loc("GST Amount") + 1)
+        net_col = get_column_letter(df.columns.get_loc("Net (ex GST)") + 1)
+        type_col = get_column_letter(df.columns.get_loc("Transaction Type") + 1)
 
-        dv = DataValidation(
-            type="list",
-            formula1='"YES,NO"',
-            allow_blank=False
-        )
+        dv = DataValidation(type="list", formula1='"YES,NO"', allow_blank=False)
         ws.add_data_validation(dv)
-        dv.add(f"{gst_col_letter}2:{gst_col_letter}{last_row}")
+        dv.add(f"{gst_col}2:{gst_col}{last_row}")
 
-        # ---- GST SUMMARY (FORMULAS) ----
-        summary_start = last_row + 3
+        # Row-level GST + Net formulas
+        for r in range(2, last_row + 1):
+            ws[f"{gst_amt_col}{r}"] = f'=IF({gst_col}{r}="YES",{gross_col}{r}/11,0)'
+            ws[f"{net_col}{r}"] = f'={gross_col}{r}-{gst_amt_col}{r}'
 
-        ws[f"A{summary_start}"] = "GST SUMMARY (AUTO-CALCULATED)"
-        ws[f"A{summary_start}"].font = ws[f"A1"].font.copy(bold=True)
+        # ---------------- SUMMARY ----------------
+        s = last_row + 3
+        ws[f"A{s}"] = "GST SUMMARY (AUTO-CALCULATED)"
+        ws[f"A{s}"].font = Font(bold=True)
 
-        ws[f"A{summary_start+2}"] = "G1 – Total sales (incl GST)"
-        ws[f"B{summary_start+2}"] = (
-            f'=SUMIF(F2:F{last_row},"Income",E2:E{last_row})'
-        )
+        ws[f"A{s+2}"] = "G1 – Total sales (incl GST)"
+        ws[f"B{s+2}"] = f'=SUMIF({type_col}2:{type_col}{last_row},"Income",{gross_col}2:{gross_col}{last_row})'
 
-        ws[f"A{summary_start+3}"] = "1A – GST on sales"
-        ws[f"B{summary_start+3}"] = f"=B{summary_start+2}/11"
+        ws[f"A{s+3}"] = "1A – GST on sales"
+        ws[f"B{s+3}"] = f"=B{s+2}/11"
 
-        ws[f"A{summary_start+4}"] = "1B – GST on purchases"
-        ws[f"B{summary_start+4}"] = (
-            f'=SUMIF(G2:G{last_row},"YES",H2:H{last_row})'
-        )
+        ws[f"A{s+4}"] = "GST-claimable expenses (gross)"
+        ws[f"B{s+4}"] = f'=SUMIF({gst_col}2:{gst_col}{last_row},"YES",{gross_col}2:{gross_col}{last_row})'
 
-        ws[f"A{summary_start+5}"] = "Net GST payable"
-        ws[f"B{summary_start+5}"] = f"=B{summary_start+3}-B{summary_start+4}"
+        ws[f"A{s+5}"] = "1B – GST on purchases"
+        ws[f"B{s+5}"] = f'=SUMIF({gst_col}2:{gst_col}{last_row},"YES",{gst_amt_col}2:{gst_amt_col}{last_row})'
+
+        ws[f"A{s+6}"] = "Net GST payable"
+        ws[f"B{s+6}"] = f"=B{s+3}-B{s+5}"
 
     return output.getvalue()
 
