@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 st.set_page_config(page_title="GST Working Papers", layout="wide")
 
@@ -12,7 +13,7 @@ st.markdown(
 )
 
 # ------------------------
-# Styling for export button
+# Styling (export button)
 # ------------------------
 st.markdown(
     """
@@ -96,7 +97,9 @@ ledger[["Transaction Type", "GST Claimable", "System Reason"]] = ledger.apply(
 
 ledger["Gross Amount"] = ledger["Amount"].abs().round(2)
 ledger["GST Amount"] = ledger.apply(
-    lambda r: round(r["Gross Amount"] / 11, 2) if r["GST Claimable"] == "YES" else 0,
+    lambda r: round(r["Gross Amount"] / 11, 2)
+    if r["GST Claimable"] == "YES"
+    else 0,
     axis=1,
 )
 ledger["Net (ex GST)"] = ledger["Gross Amount"] - ledger["GST Amount"]
@@ -120,9 +123,11 @@ edited_df = st.data_editor(
     },
 )
 
-# Recalculate GST after edits
+# Recalculate after edits
 edited_df["GST Amount"] = edited_df.apply(
-    lambda r: round(r["Gross Amount"] / 11, 2) if r["GST Claimable"] == "YES" else 0,
+    lambda r: round(r["Gross Amount"] / 11, 2)
+    if r["GST Claimable"] == "YES"
+    else 0,
     axis=1,
 )
 edited_df["Net (ex GST)"] = edited_df["Gross Amount"] - edited_df["GST Amount"]
@@ -160,20 +165,8 @@ with st.sidebar:
     st.metric("Net GST payable", f"${net_gst:,.2f}")
 
 # ------------------------
-# Excel export (auto column width)
+# Excel export with dropdowns
 # ------------------------
-def auto_adjust_columns(worksheet):
-    for column_cells in worksheet.columns:
-        max_length = 0
-        column_letter = get_column_letter(column_cells[0].column)
-        for cell in column_cells:
-            try:
-                max_length = max(max_length, len(str(cell.value)))
-            except Exception:
-                pass
-        worksheet.column_dimensions[column_letter].width = max_length + 2
-
-
 def export_excel(df):
     output = BytesIO()
 
@@ -200,12 +193,36 @@ def export_excel(df):
         df.to_excel(writer, index=False, sheet_name="GST Working Papers")
         gst_summary.to_excel(writer, index=False, sheet_name="GST Summary")
 
-        auto_adjust_columns(writer.sheets["GST Working Papers"])
-        auto_adjust_columns(writer.sheets["GST Summary"])
+        ws = writer.sheets["GST Working Papers"]
+
+        # Auto-size columns
+        for col in ws.columns:
+            max_len = max(len(str(cell.value)) if cell.value else 0 for cell in col)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = max_len + 2
+
+        # Add YES/NO dropdown to GST Claimable column
+        gst_col_index = df.columns.get_loc("GST Claimable") + 1
+        gst_col_letter = get_column_letter(gst_col_index)
+
+        dv = DataValidation(
+            type="list",
+            formula1='"YES,NO"',
+            allow_blank=False
+        )
+        ws.add_data_validation(dv)
+        dv.add(f"{gst_col_letter}2:{gst_col_letter}{len(df) + 1}")
+
+        # Auto-size GST Summary
+        ws2 = writer.sheets["GST Summary"]
+        for col in ws2.columns:
+            max_len = max(len(str(cell.value)) if cell.value else 0 for cell in col)
+            ws2.column_dimensions[get_column_letter(col[0].column)].width = max_len + 2
 
     return output.getvalue()
 
-
+# ------------------------
+# Export section
+# ------------------------
 st.divider()
 st.subheader("Export")
 
