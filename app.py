@@ -13,7 +13,7 @@ st.markdown(
 )
 
 # ------------------------
-# Styling (export button)
+# Styling
 # ------------------------
 st.markdown(
     """
@@ -133,7 +133,7 @@ edited_df["GST Amount"] = edited_df.apply(
 edited_df["Net (ex GST)"] = edited_df["Gross Amount"] - edited_df["GST Amount"]
 
 # ------------------------
-# Sidebar summaries
+# Sidebar summaries (UI only)
 # ------------------------
 with st.sidebar:
     st.header("Ledger Overview")
@@ -149,51 +149,26 @@ with st.sidebar:
     ].sum()
     one_a = round(g1 / 11, 2)
 
-    gst_exp_gross = edited_df.loc[
-        edited_df["GST Claimable"] == "YES", "Gross Amount"
-    ].sum()
     one_b = edited_df.loc[
         edited_df["GST Claimable"] == "YES", "GST Amount"
     ].sum()
 
-    net_gst = one_a - one_b
-
     st.metric("G1 – Total sales (incl GST)", f"${g1:,.2f}")
     st.metric("1A – GST on sales", f"${one_a:,.2f}")
-    st.metric("GST-claimable expenses (gross)", f"${gst_exp_gross:,.2f}")
     st.metric("1B – GST on purchases", f"${one_b:,.2f}")
-    st.metric("Net GST payable", f"${net_gst:,.2f}")
+    st.metric("Net GST payable", f"${one_a - one_b:,.2f}")
 
 # ------------------------
-# Excel export with dropdowns
+# Excel export (FORMULA-BASED SUMMARY)
 # ------------------------
 def export_excel(df):
     output = BytesIO()
 
-    gst_summary = pd.DataFrame(
-        {
-            "BAS Label": [
-                "G1 – Total sales (incl GST)",
-                "1A – GST on sales",
-                "GST-claimable expenses (gross)",
-                "1B – GST on purchases",
-                "Net GST payable",
-            ],
-            "Amount (AUD)": [
-                g1,
-                one_a,
-                gst_exp_gross,
-                one_b,
-                net_gst,
-            ],
-        }
-    )
-
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="GST Working Papers")
-        gst_summary.to_excel(writer, index=False, sheet_name="GST Summary")
-
         ws = writer.sheets["GST Working Papers"]
+
+        last_row = len(df) + 1
 
         # Auto-size columns
         for col in ws.columns:
@@ -210,13 +185,29 @@ def export_excel(df):
             allow_blank=False
         )
         ws.add_data_validation(dv)
-        dv.add(f"{gst_col_letter}2:{gst_col_letter}{len(df) + 1}")
+        dv.add(f"{gst_col_letter}2:{gst_col_letter}{last_row}")
 
-        # Auto-size GST Summary
-        ws2 = writer.sheets["GST Summary"]
-        for col in ws2.columns:
-            max_len = max(len(str(cell.value)) if cell.value else 0 for cell in col)
-            ws2.column_dimensions[get_column_letter(col[0].column)].width = max_len + 2
+        # ---- GST SUMMARY (FORMULAS) ----
+        summary_start = last_row + 3
+
+        ws[f"A{summary_start}"] = "GST SUMMARY (AUTO-CALCULATED)"
+        ws[f"A{summary_start}"].font = ws[f"A1"].font.copy(bold=True)
+
+        ws[f"A{summary_start+2}"] = "G1 – Total sales (incl GST)"
+        ws[f"B{summary_start+2}"] = (
+            f'=SUMIF(F2:F{last_row},"Income",E2:E{last_row})'
+        )
+
+        ws[f"A{summary_start+3}"] = "1A – GST on sales"
+        ws[f"B{summary_start+3}"] = f"=B{summary_start+2}/11"
+
+        ws[f"A{summary_start+4}"] = "1B – GST on purchases"
+        ws[f"B{summary_start+4}"] = (
+            f'=SUMIF(G2:G{last_row},"YES",H2:H{last_row})'
+        )
+
+        ws[f"A{summary_start+5}"] = "Net GST payable"
+        ws[f"B{summary_start+5}"] = f"=B{summary_start+3}-B{summary_start+4}"
 
     return output.getvalue()
 
