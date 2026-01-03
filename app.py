@@ -10,7 +10,7 @@ st.set_page_config(page_title="GST Working Papers", layout="wide")
 st.title("GST Working Papers Generator (AU BAS)")
 st.markdown(
     "Upload your **Commonwealth** and **Wise** CSV files. "
-    "Review GST decisions, add comments, and export BAS-ready working papers."
+    "Review GST decisions and export BAS-ready working papers."
 )
 
 # ------------------------
@@ -19,6 +19,22 @@ st.markdown(
 st.markdown(
     """
     <style>
+    .metric-box {
+        background-color: #1f2937;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        color: white;
+    }
+    .metric-label {
+        font-size: 14px;
+        opacity: 0.8;
+    }
+    .metric-value {
+        font-size: 28px;
+        font-weight: 700;
+        margin-top: 5px;
+    }
     div.stDownloadButton > button {
         width: 100%;
         height: 3em;
@@ -136,47 +152,41 @@ edited_df = st.data_editor(
 )
 
 # ------------------------
-# WEB GST SUMMARY (BACK + LIVE)
+# GST SUMMARY – BIG HTML CARDS (FIXED)
 # ------------------------
-st.subheader("GST Summary (Web)")
-
 income_gross = edited_df.loc[
     edited_df["Transaction Type"] == "Income", "Gross Amount"
 ].sum()
 
 gst_on_sales = income_gross / 11
-
 gst_claimable_gross = edited_df.loc[
     edited_df["GST Claimable"] == "YES", "Gross Amount"
 ].sum()
-
 gst_on_purchases = gst_claimable_gross / 11
-
 net_gst = gst_on_sales - gst_on_purchases
 
-summary_df = pd.DataFrame(
-    {
-        "Label": [
-            "G1 – Total sales (incl GST)",
-            "1A – GST on sales",
-            "GST-claimable expenses (gross)",
-            "1B – GST on purchases",
-            "Net GST payable",
-        ],
-        "Amount (AUD)": [
-            income_gross,
-            gst_on_sales,
-            gst_claimable_gross,
-            gst_on_purchases,
-            net_gst,
-        ],
-    }
-)
+st.subheader("GST Summary")
 
-st.dataframe(
-    summary_df.style.format({"Amount (AUD)": "${:,.2f}"}),
-    use_container_width=True,
-)
+c1, c2, c3, c4, c5 = st.columns(5)
+
+metrics = [
+    ("G1 – Total sales", income_gross),
+    ("1A – GST on sales", gst_on_sales),
+    ("GST-claimable expenses", gst_claimable_gross),
+    ("1B – GST on purchases", gst_on_purchases),
+    ("Net GST payable", net_gst),
+]
+
+for col, (label, value) in zip([c1, c2, c3, c4, c5], metrics):
+    col.markdown(
+        f"""
+        <div class="metric-box">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value">${value:,.2f}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # ------------------------
 # Excel export
@@ -198,7 +208,7 @@ def export_excel(df):
         net_col = get_column_letter(df.columns.get_loc("Net (ex GST)") + 1)
         type_col = get_column_letter(df.columns.get_loc("Transaction Type") + 1)
 
-        # Dropdown
+        # GST dropdown
         dv = DataValidation(type="list", formula1='"YES,NO"', allow_blank=False)
         ws.add_data_validation(dv)
         dv.add(f"{gst_flag_col}2:{gst_flag_col}{last_row}")
@@ -234,10 +244,19 @@ def export_excel(df):
         for r in range(s + 2, s + 7):
             ws[f"B{r}"].number_format = currency_fmt
 
-        # FINAL autosize (AFTER all formatting)
+        # Force-safe widths for numeric columns
+        ws.column_dimensions[amount_col].width = 18
+        ws.column_dimensions[gross_col].width = 18
+        ws.column_dimensions[gst_amt_col].width = 18
+        ws.column_dimensions[net_col].width = 18
+
+        # Autosize remaining columns
         for col in ws.columns:
+            letter = get_column_letter(col[0].column)
+            if ws.column_dimensions[letter].width:
+                continue
             max_len = max(len(str(cell.value)) if cell.value else 0 for cell in col)
-            ws.column_dimensions[get_column_letter(col[0].column)].width = max_len + 2
+            ws.column_dimensions[letter].width = max_len + 2
 
     return output.getvalue()
 
