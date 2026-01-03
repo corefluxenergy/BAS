@@ -97,7 +97,7 @@ ledger[["Transaction Type", "GST Claimable", "System Reason"]] = ledger.apply(
 )
 
 ledger["Gross Amount"] = ledger["Amount"].abs().round(2)
-ledger["GST Amount"] = 0.0          # placeholder (Excel will calculate)
+ledger["GST Amount"] = 0.0
 ledger["Net (ex GST)"] = ledger["Gross Amount"]
 ledger["Comment"] = ""
 
@@ -120,16 +120,7 @@ edited_df = st.data_editor(
 )
 
 # ------------------------
-# Sidebar (UI-only summary)
-# ------------------------
-with st.sidebar:
-    st.header("Ledger Overview")
-    st.write("Commonwealth:", (edited_df["Account"] == "Commonwealth").sum())
-    st.write("Wise:", (edited_df["Account"] == "Wise").sum())
-    st.write("Total rows:", len(edited_df))
-
-# ------------------------
-# Excel export (FORMULA-DRIVEN)
+# Excel export (FORMULA + CURRENCY FORMATTING)
 # ------------------------
 def export_excel(df):
     output = BytesIO()
@@ -140,26 +131,32 @@ def export_excel(df):
 
         last_row = len(df) + 1
 
+        # Identify columns
+        gross_col = get_column_letter(df.columns.get_loc("Gross Amount") + 1)
+        gst_col = get_column_letter(df.columns.get_loc("GST Claimable") + 1)
+        gst_amt_col = get_column_letter(df.columns.get_loc("GST Amount") + 1)
+        net_col = get_column_letter(df.columns.get_loc("Net (ex GST)") + 1)
+        type_col = get_column_letter(df.columns.get_loc("Transaction Type") + 1)
+
+        currency_fmt = '$#,##0.00'
+
         # Auto-size columns
         for col in ws.columns:
             max_len = max(len(str(cell.value)) if cell.value else 0 for cell in col)
             ws.column_dimensions[get_column_letter(col[0].column)].width = max_len + 2
 
         # GST Claimable dropdown
-        gst_col = get_column_letter(df.columns.get_loc("GST Claimable") + 1)
-        gross_col = get_column_letter(df.columns.get_loc("Gross Amount") + 1)
-        gst_amt_col = get_column_letter(df.columns.get_loc("GST Amount") + 1)
-        net_col = get_column_letter(df.columns.get_loc("Net (ex GST)") + 1)
-        type_col = get_column_letter(df.columns.get_loc("Transaction Type") + 1)
-
         dv = DataValidation(type="list", formula1='"YES,NO"', allow_blank=False)
         ws.add_data_validation(dv)
         dv.add(f"{gst_col}2:{gst_col}{last_row}")
 
-        # Row-level GST + Net formulas
+        # Row-level formulas + currency formatting
         for r in range(2, last_row + 1):
             ws[f"{gst_amt_col}{r}"] = f'=IF({gst_col}{r}="YES",{gross_col}{r}/11,0)'
             ws[f"{net_col}{r}"] = f'={gross_col}{r}-{gst_amt_col}{r}'
+            ws[f"{gross_col}{r}"].number_format = currency_fmt
+            ws[f"{gst_amt_col}{r}"].number_format = currency_fmt
+            ws[f"{net_col}{r}"].number_format = currency_fmt
 
         # ---------------- SUMMARY ----------------
         s = last_row + 3
@@ -180,6 +177,10 @@ def export_excel(df):
 
         ws[f"A{s+6}"] = "Net GST payable"
         ws[f"B{s+6}"] = f"=B{s+3}-B{s+5}"
+
+        # Currency formatting for summary
+        for row in range(s + 2, s + 7):
+            ws[f"B{row}"].number_format = currency_fmt
 
     return output.getvalue()
 
