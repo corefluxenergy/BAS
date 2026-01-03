@@ -78,12 +78,12 @@ ledger = pd.concat(
 # ------------------------
 # Determine BAS Quarter
 # ------------------------
-def month_to_quarter(month):
-    if month <= 3:
+def month_to_quarter(m):
+    if m <= 3:
         return "Q1"
-    if month <= 6:
+    if m <= 6:
         return "Q2"
-    if month <= 9:
+    if m <= 9:
         return "Q3"
     return "Q4"
 
@@ -136,6 +136,49 @@ edited_df = st.data_editor(
 )
 
 # ------------------------
+# WEB GST SUMMARY (BACK + LIVE)
+# ------------------------
+st.subheader("GST Summary (Web)")
+
+income_gross = edited_df.loc[
+    edited_df["Transaction Type"] == "Income", "Gross Amount"
+].sum()
+
+gst_on_sales = income_gross / 11
+
+gst_claimable_gross = edited_df.loc[
+    edited_df["GST Claimable"] == "YES", "Gross Amount"
+].sum()
+
+gst_on_purchases = gst_claimable_gross / 11
+
+net_gst = gst_on_sales - gst_on_purchases
+
+summary_df = pd.DataFrame(
+    {
+        "Label": [
+            "G1 – Total sales (incl GST)",
+            "1A – GST on sales",
+            "GST-claimable expenses (gross)",
+            "1B – GST on purchases",
+            "Net GST payable",
+        ],
+        "Amount (AUD)": [
+            income_gross,
+            gst_on_sales,
+            gst_claimable_gross,
+            gst_on_purchases,
+            net_gst,
+        ],
+    }
+)
+
+st.dataframe(
+    summary_df.style.format({"Amount (AUD)": "${:,.2f}"}),
+    use_container_width=True,
+)
+
+# ------------------------
 # Excel export
 # ------------------------
 def export_excel(df):
@@ -148,7 +191,6 @@ def export_excel(df):
 
         last_row = len(df) + 1
 
-        # Column letters
         amount_col = get_column_letter(df.columns.get_loc("Amount") + 1)
         gross_col = get_column_letter(df.columns.get_loc("Gross Amount") + 1)
         gst_flag_col = get_column_letter(df.columns.get_loc("GST Claimable") + 1)
@@ -156,7 +198,7 @@ def export_excel(df):
         net_col = get_column_letter(df.columns.get_loc("Net (ex GST)") + 1)
         type_col = get_column_letter(df.columns.get_loc("Transaction Type") + 1)
 
-        # GST dropdown
+        # Dropdown
         dv = DataValidation(type="list", formula1='"YES,NO"', allow_blank=False)
         ws.add_data_validation(dv)
         dv.add(f"{gst_flag_col}2:{gst_flag_col}{last_row}")
@@ -169,7 +211,7 @@ def export_excel(df):
             for col in [amount_col, gross_col, gst_amt_col, net_col]:
                 ws[f"{col}{r}"].number_format = currency_fmt
 
-        # ---------------- SUMMARY ----------------
+        # Summary
         s = last_row + 3
         ws[f"A{s}"] = "GST SUMMARY (AUTO-CALCULATED)"
         ws[f"A{s}"].font = Font(bold=True)
@@ -192,7 +234,7 @@ def export_excel(df):
         for r in range(s + 2, s + 7):
             ws[f"B{r}"].number_format = currency_fmt
 
-        # ---------------- FINAL AUTOSIZE (AFTER FORMATTING) ----------------
+        # FINAL autosize (AFTER all formatting)
         for col in ws.columns:
             max_len = max(len(str(cell.value)) if cell.value else 0 for cell in col)
             ws.column_dimensions[get_column_letter(col[0].column)].width = max_len + 2
