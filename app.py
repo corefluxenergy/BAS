@@ -10,6 +10,20 @@ st.markdown(
     "Review GST decisions, add comments, and export working papers."
 )
 
+st.markdown(
+    """
+    <style>
+    div.stDownloadButton > button {
+        width: 100%;
+        height: 3em;
+        font-size: 18px;
+        font-weight: 600;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # Upload files
 col1, col2 = st.columns(2)
 with col1:
@@ -104,12 +118,45 @@ with st.sidebar:
 
 def export_excel(df):
     output = BytesIO()
+
+    # Recalculate summary from df (same as UI)
+    g1 = df.loc[df["Transaction Type"] == "Income", "Gross Amount"].sum()
+    one_a = round(g1 / 11, 2)
+    gst_exp_gross = df.loc[df["GST Claimable"], "Gross Amount"].sum()
+    one_b = df.loc[df["GST Claimable"], "GST Amount"].sum()
+    net_gst = one_a - one_b
+
+    gst_summary = pd.DataFrame(
+        {
+            "BAS Label": [
+                "G1 – Total sales (incl GST)",
+                "1A – GST on sales",
+                "GST-claimable expenses (gross)",
+                "1B – GST on purchases",
+                "Net GST payable",
+            ],
+            "Amount (AUD)": [
+                g1,
+                one_a,
+                gst_exp_gross,
+                one_b,
+                net_gst,
+            ],
+        }
+    )
+
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="GST Working Papers")
+        gst_summary.to_excel(writer, index=False, sheet_name="GST Summary")
+
     return output.getvalue()
 
+st.divider()
+st.subheader("Export")
+
 st.download_button(
-    "Export Excel (Working Papers)",
-    export_excel(edited_df),
+    label="⬇️ Export Excel (GST Working Papers)",
+    data=export_excel(edited_df),
     file_name="GST_Working_Papers.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
